@@ -83,6 +83,7 @@ func (k *kubernetesExecutionImpl) signal(ctx context.Context, sig string) error 
 			"Cannot send signal to process.",
 			"Not sending signal to process, pod is already shutting down.",
 		).Label("signal", sig)
+		k.lock.Unlock()
 		k.logger.Debug(err)
 		return err
 	}
@@ -254,7 +255,8 @@ func (k *kubernetesExecutionImpl) run(
 	closeWrite func() error,
 	onExit func(exitStatus int),
 ) {
-	pidChannel := make(chan uint32)
+	// Buffered so the stdout writer never blocks if run() has already returned.
+	pidChannel := make(chan uint32, 1)
 	if !k.pod.config.Pod.DisableAgent {
 		if k.pod.config.Pod.Mode == config.KubernetesExecutionModeSession {
 			stdin = &stdinProxyReader{
@@ -264,7 +266,8 @@ func (k *kubernetesExecutionImpl) run(
 			}
 		}
 		stdout = &stdoutProxyWriter{
-			tty:        k.tty,
+			// Only session mode injects a newline before the PID; see stdinProxyReader.
+			tty:        k.tty && k.pod.config.Pod.Mode == config.KubernetesExecutionModeSession,
 			backend:    stdout,
 			lock:       &sync.Mutex{},
 			pidChannel: pidChannel,
@@ -273,14 +276,21 @@ func (k *kubernetesExecutionImpl) run(
 	}
 	go k.handleStream(stdin, stdout, stderr, closeWrite, onExit)
 	if !k.pod.config.Pod.DisableAgent {
-		pid := <-pidChannel
-		k.logger.Debug(
-			message.NewMessage(
-				message.MKubernetesPIDReceived,
-				"Received PID %d from agent",
-				pid,
-			))
-		k.pid = int(pid)
+		// The stream can end before the agent reports a PID (e.g. the exec failed to start). Do not wait
+		// forever: the caller holds the connection lock, which would block OnDisconnect and pod removal.
+		select {
+		case pid := <-pidChannel:
+			k.logger.Debug(
+				message.NewMessage(
+					message.MKubernetesPIDReceived,
+					"Received PID %d from agent",
+					pid,
+				))
+			k.lock.Lock()
+			k.pid = int(pid)
+			k.lock.Unlock()
+		case <-k.doneChan:
+		}
 	}
 }
 

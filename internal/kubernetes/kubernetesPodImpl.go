@@ -44,9 +44,14 @@ type kubernetesPodImpl struct {
 }
 
 func (k *kubernetesPodImpl) getExitCode(ctx context.Context) (int32, error) {
-	if k.config.Pod.Mode == config2.KubernetesExecutionModePersistent {
-		k.logger.Debug(message.NewMessage(message.MKubernetesPodAttach, "Skipping exit code check in connection mode"))
+	switch k.config.Pod.Mode {
+	case config2.KubernetesExecutionModePersistent:
+		k.logger.Debug(message.NewMessage(message.MKubernetesPodAttach, "Skipping exit code check in persistent mode"))
 		return 0, nil
+	case config2.KubernetesExecutionModeConnection:
+		// The console container runs the idle command and does not exit while the connection is open.
+		k.logger.Debug(message.NewMessage(message.MKubernetesPodAttach, "Skipping exit code check in connection mode"))
+		return 137, nil
 	}
 
 	var pod *core.Pod
@@ -136,6 +141,7 @@ func (k *kubernetesPodImpl) attach(_ context.Context) (kubernetesExecution, erro
 		exec: podExec,
 		terminalSizeQueue: &pushSizeQueueImpl{
 			resizeChan: make(chan remotecommand.TerminalSize),
+			done:       make(chan struct{}),
 		},
 		logger:                k.logger,
 		tty:                   *k.tty,
@@ -221,6 +227,7 @@ func (k *kubernetesPodImpl) createExecLocked(
 		exec: podExec,
 		terminalSizeQueue: &pushSizeQueueImpl{
 			resizeChan: make(chan remotecommand.TerminalSize),
+			done:       make(chan struct{}),
 		},
 		logger:                k.logger,
 		env:                   env,
