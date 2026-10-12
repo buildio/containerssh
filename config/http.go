@@ -336,7 +336,8 @@ func (c *HTTPClientConfiguration) ValidateWithCerts() (*HTTPClientCerts, error) 
 
 	_, err := url.ParseRequestURI(c.URL)
 	if err != nil {
-		return nil, newError("url", "invalid URL: %s", c.URL)
+		// Do not print the URL: it can hold a password.
+		return nil, newError("url", "invalid URL")
 	}
 	if c.Timeout < 100*time.Millisecond {
 		return nil, newError("timeout", "timeout value %s is too low, must be at least 100ms", c.Timeout.String())

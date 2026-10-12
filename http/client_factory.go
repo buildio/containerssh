@@ -35,7 +35,7 @@ func NewClientWithHeaders(
 
 	return &client{
 		config:           config,
-		logger:           logger.WithLabel("endpoint", config.URL),
+		logger:           logger.WithLabel("endpoint", redactURL(config.URL)),
 		tlsConfig:        tlsConfig,
 		extraHeaders:     extraHeaders,
 		allowLaxDecoding: allowLaxDecoding,

@@ -122,7 +122,9 @@ func (c *client) requestURLWithLogger(
 	responseBody interface{},
 	logger log.Logger,
 ) (int, error) {
-	logger = logger.WithLabel("method", method).WithLabel("url", u)
+	// Never log the password from the URL userinfo; the request itself still uses it for Basic auth.
+	logURL := redactURL(u)
+	logger = logger.WithLabel("method", method).WithLabel("url", logURL)
 
 	httpClient := c.createHTTPClient(logger)
 	req, err := c.createRequestForURL(method, u, requestBody, logger)
@@ -130,7 +132,7 @@ func (c *client) requestURLWithLogger(
 		return 0, err
 	}
 
-	logger.Debug(message.NewMessage(message.MHTTPClientRequest, "HTTP %s request to %s", method, u))
+	logger.Debug(message.NewMessage(message.MHTTPClientRequest, "HTTP %s request to %s", method, logURL))
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
@@ -139,7 +141,7 @@ func (c *client) requestURLWithLogger(
 			return 0, err
 		}
 		err = message.Wrap(err,
-			message.EHTTPFailureConnectionFailed, "HTTP %s request to %s failed", method, u)
+			message.EHTTPFailureConnectionFailed, "HTTP %s request to %s failed", method, logURL)
 		logger.Debug(err)
 		return 0, err
 	}
@@ -155,7 +157,7 @@ func (c *client) requestURLWithLogger(
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		err = message.Wrap(err,
-			message.EHTTPFailureConnectionFailed, "HTTP %s request to %s failed", method, u)
+			message.EHTTPFailureConnectionFailed, "HTTP %s request to %s failed", method, logURL)
 		logger.Debug(err)
 		return 0, err
 	}
@@ -267,17 +269,26 @@ func (c *client) createHTTPClient(logger log.Logger) *http.Client {
 			if !c.config.AllowRedirects {
 				return message.NewMessage(
 					message.EHTTPClientRedirectsDisabled,
-					"Redirects disabled, server tried to redirect to %s", req.URL,
-				).Label("redirect", req.URL)
+					"Redirects disabled, server tried to redirect to %s", req.URL.Redacted(),
+				).Label("redirect", req.URL.Redacted())
 			}
 			logger.Debug(
 				message.NewMessage(
-					message.MHTTPClientRedirect, "HTTP redirect to %s", req.URL,
-				).Label("redirect", req.URL),
+					message.MHTTPClientRedirect, "HTTP redirect to %s", req.URL.Redacted(),
+				).Label("redirect", req.URL.Redacted()),
 			)
 			return nil
 		},
 		Timeout: c.config.Timeout,
 	}
 	return httpClient
+}
+
+// redactURL returns the URL with the password replaced, for logs and errors.
+func redactURL(u string) string {
+	parsed, err := url.Parse(u)
+	if err != nil {
+		return "(invalid URL)"
+	}
+	return parsed.Redacted()
 }
