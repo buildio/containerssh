@@ -95,7 +95,15 @@ func (k *kubernetesClientImpl) attemptPodCreate(
 			wg:                    &sync.WaitGroup{},
 			removeLock:            &sync.Mutex{},
 		}
-		return createdPod.wait(ctx)
+		readyPod, err := createdPod.wait(ctx)
+		if err != nil {
+			// The pod exists, so remove it. Otherwise it stays after the connection is rejected.
+			removeCtx, cancel := context.WithTimeout(context.Background(), k.config.Timeouts.PodStop)
+			defer cancel()
+			_ = createdPod.remove(removeCtx)
+			return nil, err
+		}
+		return readyPod, nil
 	}
 	k.backendFailuresMetric.Increment()
 	logger.Debug(
